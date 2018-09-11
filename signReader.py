@@ -414,7 +414,7 @@ class SampleListener(Leap.Listener):
         
         #if this is the first frame in this recording session, save this
         if (self.first):
-            print("RECORDING... Hit space to get sign, d to print data, f to print data to file, and p to pause.")
+            print("RECORDING... Hit space to get sign, 2 to print data, 3 to print finger length/coordinates, f to print data to file, and p to pause.")
             self.first = False
             self.firstFrameId = frame
         else:
@@ -436,33 +436,83 @@ class SampleListener(Leap.Listener):
         if state == Leap.Gesture.STATE_INVALID:
             return "STATE_INVALID"
     
+def framesEqual(frame1, frame2): 
+    """framesEqual() function returns true if the 2 frames are about equal
 
+        takes 2 frames and checks each finger (each frame should only have 1 hand)
 
-def isSteady(frameList=[], frameCount): 
-     """isSteady function returns true if the hand is steady
+        Parameters
+        ----------
+        frame1: frame
+            first frame
+        frame2: frame
+            second frame to compare
 
-    checks if the last (framecount) frames in the list (frameList) are about equal
-    if so, the hand is steady, return true. otherwise return false.
+        Returns
+        -------
+        bool
+            true if frames are about equal, false if not
+        """
 
-    Parameters
-    ----------
-    frameList : list of frames
-        list of recent frames, should have more than framecount
-    frameCount : int
-        number of frames to check
+    if (frame1.fingers.is_empty or frame2.fingers.isempty):
+        return False
 
-    Returns
-    -------
-    bool
-        true if hand is steady, false otherwise.
+    for finger_type in range(0,5): #iterates from 0(TYPE_THUMB) to 4 (TYPE_PINKY):
+        group1 = dict(getFingers(frame1))
+        group2 = dict(getFingers(frame2)) 
 
-    """
-    for x in frameList:
+        if(len(group1) != len(group2)): #if one frame has more fingers than the other frame
+            return False
+
+        for a,f in group1:
+            print ("%s FINGER 1", a)
+            print f.stabilized_tip_position
+            print ("%s FINGER 2", a)
+            print group2[a].stabilized_tip_position
+            print ("DISTANCE IS %f", (f.stabilized_tip_position).distance_to(group2[a].stabilized_tip_position))
+
 
     return True
-    return False
 
 
+def isSteady(frameList, frameCount): 
+    """ isSteady function returns true if the hand is steady
+
+            checks if the last (framecount) frames in the list (frameList) are about equal
+            if so, the hand is steady, return true. otherwise return false.
+
+            Parameters
+            ----------
+            frameList : list of frames
+                list of recent frames, should have more than framecount
+            frameCount : int
+                number of frames to check
+
+            Returns
+            -------
+            bool
+                true if hand is steady, false otherwise.
+    """
+    total = len(frameList)
+
+    frame1 = frameList[total - frameCount] #first frame that we want to check
+    i = (total - frameCount + 1)           #index of the frame after that one
+    frame2 = frameList[i]
+
+    for x in range(i, frameCount):          #iterate through the selected frames
+
+        if (not framesEqual(frame1, frame2)): #if they're not about equal,
+            print "NOT STEADY"
+            return False                    #then quit
+        frame1 = frame2                     #otherwise, iterate to the next 2 frames.
+        frame2 = frameList[x]
+    #print "STEADY"
+    return True                             #return true if you get through the entire loop 
+
+
+
+
+#######################################################
 
 def main():
     """Main Function, body of program"""
@@ -473,9 +523,9 @@ def main():
     listener = SampleListener()
     controller = Leap.Controller()
 
-    frames = []
-    frameCounter = 0 #current number of frames stored
-    maxFrames = 10 # maximum number of frames to store
+    frames = []         # list, store recetn frames
+    frameCounter = 0    # current number of frames stored
+    maxFrames = 10      # maximum number of frames to store
 
 
     myCoords = []
@@ -497,36 +547,51 @@ def main():
         ch = getch()
         while(not(ch == "q")):
 
-            # RESUME/ PAUSE
+            #---------------
+            # q     -> quits program
+            # r     -> resume recording 
+            # p     -> pause recording
 
-            if (ch == "r" and not recording): #RESUME RECORDING
+            if (ch == "r" and not recording):   #RESUME RECORDING
                 print("Hit any key to resume recording. Hit p to pause")
                 recording = True
-            if (ch == "p"): #PAUSE RECORDING
+
+            if (ch == "p"):                     #PAUSE RECORDING
                 print("Hit r to resume.")
                 paused = True
                 controller.remove_listener(listener)
                 recording = False
 
-
+            #--------------------
             # Get next frame, store in array at index frameCounter #
-            frames[frameCounter] = controller.frame()
+            frames.append(controller.frame())
 
-            if (frameCounter == maxFrames): ##if we already have 10 frames, delete the oldest
+            if (not len(frames) == maxFrames): ##if we already have 10 frames, delete the oldest   
+                frameCounter += 1
+            else:
                 del frames[0]
-            else
-                frameCounter++
+                
 
-
+            mostRecentFrame = frames[frameCounter-1]
 
             
+
+
+
+            #---------------
+            # OTHER OPTIONS:
+            # 2         -> prints finger lengths, statuses, and distances from palm
+            # 3         -> prints finger coordinates and length
+            # spacebar  -> manually sends frame, checks for a sign
+
+
             if (ch == "2" and recording): #PRINT FINGER STATUSES
                 
-                myFingerList = getFingers(frame2)
-                printFingerStatuses(myFingerList, frame2.hands.frontmost);
+                myFingerList = getFingers(mostRecentFrame)
+                printFingerStatuses(myFingerList, mostRecentFrame.hands.frontmost);
             if (ch == "3" and recording): #PRINT FINGER COORDINATES AND LENGTH 
-                myCoords = getCoordList(frame2)
-                myFingerList = getFingers(frame2)
+                myCoords = getCoordList(mostRecentFrame)
+                myFingerList = getFingers(mostRecentFrame)
                 if myFingerList:
                     for a, y in myFingerList:
                         print "%s length: %f" % (a, y.length)
@@ -534,17 +599,17 @@ def main():
                     for a, y in myCoords:
                         print "%s: (x: %f, y: %f, z: %f)" % (a, y.x, y.y, y.z)
             if (ch == " " and  recording): #PRINT CURRENT SIGN
-                myCoords = getCoordList(frame2)
-                myFingerList = getFingers(frame2)
+                myCoords = getCoordList(mostRecentFrame)
+                myFingerList = getFingers(mostRecentFrame)
                 #fingerlengths = getFingerLengths(frame2)
                     #if myFingerList:
                     #for a, y in myFingerList:
                     #    print "%s length: %f" % (a, y.length)
                     #fingerStatus = getStatus(dict(myCoords), dict(fingerLengths), myFingerList)
-                fingerStatuses = getFingerStatuses(myFingerList, frame2.hands.frontmost)
+                fingerStatuses = getFingerStatuses(myFingerList, mostRecentFrame.hands.frontmost)
                 #for a, f in fingerStatuses:
                     #  print "%s is %s" % (a,f)
-                getSign(fingerStatuses, frame2.hands.frontmost)
+                getSign(fingerStatuses, mostRecentFrame.hands.frontmost)
                 
             if (recording):
                 controller.add_listener(listener)
@@ -557,8 +622,10 @@ def main():
     # ========================================================#
 
     except KeyboardInterrupt: 
+        os.system("stty echo")
         pass
     finally:
+        os.system("stty echo")
         controller.remove_listener(listener) #Remove the sample listener when done
 
 

@@ -523,6 +523,7 @@ def main():
         recording = False
 
     except KeyboardInterrupt:
+        os.system("stty echo")
         pass
     finally:
         # Remove the sample listener when done
