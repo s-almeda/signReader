@@ -10,6 +10,7 @@
 #
 ################################################################################
 from __future__ import with_statement
+from datetime import timedelta 
 import Leap, sys, thread, time, termios, tty, os, datetime, math
 import numpy as np
 import numpy.linalg 
@@ -18,20 +19,20 @@ from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 #margin of error used for comparing distances to detect finger status
 thumbExtendedMargin = 70 #if angle between thumb and palm is > this, thumb is extended
 thumbUpMargin = 20 #if angle between thumb and hand is < this, thumb is up
-thumbInMargin = 20 #if distance from thumb tip to palm is < this, thumb is in
+thumbInMargin = 10 #if distance from thumb tip to palm is < this, thumb is in
 extendedMargin = 9
-rollDifference = 20 #if the difference between the roll and 90 is < this, the palm is sideways
+rollDifference = 25 #if the difference between the roll and 90 is < this, the palm is sideways
 thumbStraightMargin = 30
 Vmargin = 30
 touchingMargin = 10
 isTouchingMargin = 30
 straightOutMargin = 10
-curledMargin = 6
+curledMargin = 10
 downMargin = 0
-maxFrames = 10      # maximum number of frames to store
+maxFrames = 120      # maximum number of frames to store
 maxDistance = 2 # max distance between steady frames
 
-def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbFingersTouching):
+def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbMiddleTouching):
     angleToPalmOf = dict(anglesToPalm) #make a dictionary with angles from fingers to palm
     angleBetween = dict(fingerAngles) #Returns dict with angles in this order: ['TI', 'IM', 'MR', 'RP']
     statusOf = dict(fingers) #make a dictionary with finger initials as keys or 'palm' as key
@@ -57,9 +58,14 @@ def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbFingersTouching):
             return
 
     ##--------- SIGNS WITH NORMAL PALM ORIENTATION ------------###
-    if ((statusOf['P'] == 'curled') and statusOf['T'] == 'in' and statusOf['I'] is not 'up'): #pinky is curled and thumb is in
-                    print "You signed an E"
-                    return
+    if (statusOf['P'] == 'curled'):
+        if statusOf['T'] == 'in' and statusOf['I'] is not 'up': #pinky is curled and thumb is in
+            print "You signed an E"
+            return
+        #if it's not an E, it was probably misread as curled
+        for key in statusOf:
+            if (statusOf[key] == 'curled'):
+                statusOf[key] = 'up'
     
     if(statusOf['P'] == 'down'): #PINKY IS DOWN 
         #CHECK MIDDLE FINGER STATUS
@@ -68,13 +74,16 @@ def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbFingersTouching):
                 print "You signed an L"
                 return
             elif (statusOf['I'] == 'down' or statusOf['I'] == 'curled'): #all fingers down
-                if (statusOf['T'] == 'up'):
+                if (statusOf['T'] == 'up' or statusOf['T'] == 'out'):
                     print "You signed an A" #or  a T
                     return
                 else:
                     print "You signed an S"
                     return
             elif (angleToPalmOf['I'] < 75): #finger is curled
+                if (statusOf['palm'] == 'SIDEWAYS'):
+                    print "You signed a G"
+                    return
                 print "You signed an X"
                 return
             else:
@@ -102,7 +111,8 @@ def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbFingersTouching):
                     return
             elif(statusOf['R'] != 'up'):
                 print "Peace among worlds!"
-        return
+                return
+        statusOf['P'] = 'bent'
     if (statusOf['P'] is 'bent' or statusOf['P'] is 'out'): 
         if (statusOf['R'] == 'up' and statusOf['M'] == 'up'):
             print "You signed a W"
@@ -110,6 +120,20 @@ def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbFingersTouching):
         else:
             if (statusOf['I'] == 'up'):
                 if (statusOf['T'] == 'out'):
+                    if (statusOf['M'] == 'up'):
+                        #this person signs U, V, R with their pinky pointed out
+                        if (angleBetween['IM'] > Vmargin):
+                            print "You signed a V"
+                            return
+                        if (angleBetween['IM'] < touchingMargin):
+                            print "You signed a U"
+                            return
+                        else:
+                            print "You signed an R"
+                            return
+                    if (thumbMiddleTouching):
+                        print "You signed a D"
+                        return
                     print "You signed an L"
                     return
                 elif (statusOf['M'] is 'out' or statusOf['M'] is 'bent'):
@@ -119,11 +143,12 @@ def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbFingersTouching):
                     print "You signed a D"
                     return
             elif (statusOf['M'] != 'up'):
-                if (thumbFingersTouching):
+                if (thumbMiddleTouching):
                     print "You signed an O" 
                 else:
                     print "You signed a C" 
-        return
+                return
+        statusOf['P'] = 'up'
     if(statusOf['P'] == 'up'):
         if (statusOf['R'] == 'up'): #RING IS EXTENDED
             if (statusOf['I'] == 'up'): #INDEX IS EXTENDED
@@ -205,7 +230,7 @@ def getFingerStatuses(fingers, hand, printRequested):
                 status = 'bent'
                 if ((tipToPalm -shortLength) < extendedMargin or abs(angleToPalm[a]- 90) < extendedMargin):
                         status = 'out'
-                if ((tipToPalm < thumbInMargin)): #if middle of thumb is closer to palm than base of thumb
+                if ((tipToPalm < thumbInMargin) and angleToHand[a] > 20): #if middle of thumb is closer to palm than base of thumb
                         status = 'in'
 
 
@@ -515,7 +540,8 @@ class SampleListener(Leap.Listener):
     state_names = ['STATE_INVALID', 'STATE_START', 'STATE_UPDATE', 'STATE_END']
     first = False
     firstFrameId = 0
-    mostRecentFrameId = 0
+    mostRecentFrame = 0
+    initialTime = 0 #timestamp of first frame in ms
 
     frames = []
         
@@ -542,25 +568,19 @@ class SampleListener(Leap.Listener):
         print "Disconnected"
     
     def on_exit(self, controller):
-        #print("First  frame: " + str(self.firstFrameId) + "\n")
-        #self.printFrameInfo(self.firstFrameId)
-        #print("Most recent frame: " + str(self.mostRecentFrameId))
-        #self.printFrameInfo(self.mostRecentFrameId)
         print "EXIT"
     
     def on_frame(self, controller):
         
         # Get the most recent frame and report some basic information
         frame = controller.frame()
-        
-        #if this is the first frame in this recording session, save this
+        self.frames.append(frame)
         if (self.first):
             print("RECORDING... Hit space to get sign, 2 to print data, 3 to print finger length/coordinates, f to print data to file, and p to pause.")
+            initialTime = frame.timestamp
             self.first = False
-            self.firstFrameId = frame
         else:
-            self.mostRecentFrameId = frame
-            self.frames.append(frame)
+            self.mostRecentFrame = frame
             if (len(self.frames) > maxFrames):
                 del self.frames[0] #delete the oldest
             #print("Most recent frame: " + str(self.mostRecentFrameId))
@@ -657,6 +677,33 @@ def isSteady(listener):
     if (framesEqual(listener.frames[-1], listener.frames[-2]) and framesEqual(listener.frames[-2], listener.frames[-3])):
         return True
     return False
+
+
+
+def getFPS(frames, var, printRequested):
+    #initialize some things
+    timestamp_a = frames[0].timestamp
+    frameLoop = 1
+    avgTimeDifference = 0
+
+    #loop through frames specified and print out the time difference between each pair
+    while (frameLoop <= int(var)-1): 
+        timestamp_b = frames[frameLoop].timestamp
+        timeDifference = (timestamp_b - timestamp_a)
+        if(printRequested):
+            print "frame %d to %d: %d microseconds" % (frameLoop, frameLoop+1, timeDifference)
+        timestamp_a = timestamp_b
+        frameLoop += 1
+        avgTimeDifference += timeDifference
+    avgTimeDifference /= (int(var)-1)
+    if(printRequested):
+        print "average time difference between frames in microseconds :", avgTimeDifference
+    # the average frames per second is 1000000 microseconds(the number of micros in a single second)
+    # divided by the average time it takes to get a new frame
+    avgFPS = 1000000 / avgTimeDifference 
+    if(printRequested):
+        print "average frames per second: ", avgFPS
+    return avgFPS
 #######################################################
 
 def main():
@@ -668,10 +715,10 @@ def main():
     listener = SampleListener()
     controller = Leap.Controller()
 
-    frames = []         # list, store recent frames
-    frameCounter = 0    # current number of frames stored
+    frames = listener.frames        # list, store recent frames
 
 
+    currentFPS = 0
 
     myCoords = []
     fingerStatuses = []
@@ -680,7 +727,6 @@ def main():
     ts = time.time()
     st = datetime.datetime.fromtimestamp(ts).strftime('%H-%M-%S')
     
-    # Have the sample listener receive events from the controller
     
     
     # ========================================================#
@@ -697,6 +743,9 @@ def main():
             # q     -> quits program
             # r     -> resume recording 
             # p     -> pause recording
+            # t     -> print timestamps
+
+            
 
             if ((ch == "r" or ch == "R") and not recording):   #RESUME RECORDING
                 print("Hit any key to resume recording. Hit p to pause")
@@ -708,29 +757,28 @@ def main():
                 controller.remove_listener(listener)
                 recording = False
 
-            #--------------------
-            # Get next frame, store in array at index frameCounter #
-            frames.append(controller.frame())
+            mostRecentFrame = listener.mostRecentFrame
+            frameCount = len(frames)
 
-            if (not len(frames) >= maxFrames): ##if we already have 10 frames, delete the oldest   
-                frameCounter += 1
-            else:      
-                del frames[0]
+            if (ch == "t"):
+                print "enter # of frames"
+                var = raw_input("enter # of frames 1 - %d or hit enter for all\n" % frameCount)
+                if (not var.isdigit()):
+                    var = frameCount
 
-            mostRecentFrame = frames[frameCounter-1]
-
-            
-
-
+                currentFPS = getFPS(frames, int(var), True)
 
             #---------------
             # OTHER OPTIONS:
+            # 1         -> prints FPS
             # 2         -> prints finger lengths, statuses, and distances from palm
             # 3         -> prints finger coordinates and length
             # 4         -> prints finger angles between each other and palm
             # spacebar  -> manually sends frame, checks for a sign
 
-
+            if (ch == "1"):
+                currentFPS =  getFPS(frames, frameCount, False)
+                print "CURRENT FPS: ", currentFPS
             if (ch == "2" and recording): #PRINT FINGER STATUSES
                 
                 myFingerList = getFingers(mostRecentFrame)
@@ -783,6 +831,8 @@ def main():
 
             if(recording):
                 controller.add_listener(listener)
+
+
                 
 
 
