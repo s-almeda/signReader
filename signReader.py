@@ -812,6 +812,32 @@ def main():
                         print "%s  %f knucks distance to palm" % (a, (y.bone(0).next_joint.distance_to(palmCenter)))
                         print "%s  %f middle joint distance to palm" % (a, abs(y.bone(1).center.distance_to(palmCenter)))
 
+
+
+            if (ch == "m" and recording): #print hand motion information
+                myFingerList = getFingers(mostRecentFrame)
+                myHand = mostRecentFrame.hands.frontmost
+                start_frame = frames[frameCount-int(getFPS(frames, frameCount, False) *0.5)] #start from the beginning of the last half second
+                print ("--------------\nTranslation Vector:")
+                print (myHand.translation(start_frame))
+
+                if (myHand.translation(start_frame).y > 50):
+                    print "\n==================\n     UP!!   \n=================="
+
+                print ("Probability: %f") % myHand.translation_probability(start_frame)
+                print ("Rotation Matrix:")
+                print (myHand.rotation_matrix(start_frame))
+                print ("Probability: %f") % myHand.rotation_probability(start_frame)
+                print ("Rotational Angle:")
+                print (myHand.rotation_angle(start_frame))
+
+
+                if (myHand.rotation_angle(start_frame) > 2):
+                    print "==================\n      FLIPPED!    \n==================="
+
+                print ("Around Rotational Axis:")
+                print (myHand.rotation_axis(start_frame))
+              
             #~ GET SIGN ~#
             if (ch == " " and  recording): #PRINT CURRENT SIGN
                 if (isSteady(listener)):
