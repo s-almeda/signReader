@@ -12,8 +12,11 @@
 from __future__ import with_statement
 from datetime import timedelta 
 import Leap, sys, thread, time, termios, tty, os, datetime, math
+reload(sys)
+sys.setdefaultencoding('utf8')
 import numpy as np
-import numpy.linalg 
+import matplotlib.pyplot as plt 
+plt.switch_backend('TKAgg')
 from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 
 #margin of error used for comparing distances to detect finger status
@@ -30,9 +33,12 @@ straightOutMargin = 10
 curledMargin = 10
 downMargin = 0
 maxFrames = 120      # maximum number of frames to store
-maxDistance = 2 # max distance between steady frames
+maxDistance = 3 # max distance between steady frames
 
-def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbMiddleTouching):
+
+
+
+def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbMiddleTouching, listener):
     angleToPalmOf = dict(anglesToPalm) #make a dictionary with angles from fingers to palm
     angleBetween = dict(fingerAngles) #Returns dict with angles in this order: ['TI', 'IM', 'MR', 'RP']
     statusOf = dict(fingers) #make a dictionary with finger initials as keys or 'palm' as key
@@ -170,9 +176,46 @@ def getSign(fingers, hand, anglesToPalm, fingerAngles, thumbMiddleTouching):
                     print "You signed a Y"
                     return
             else:
-                print "You signed an I"
+                if not (isJorZ(listener)):
+                    print "You signed an I"
                 return
     print "I don't know what you signed!"
+
+
+
+def plot(vals, isY):
+    plt.title("PINKY POSITION OVER TIME:")
+    #plt.ylim(-50, 250)
+
+    plt.plot(vals)
+    plt.plot(vals,'or')
+    plt.xlabel("Frame #")
+    if (isY):
+        plt.ylabel("Y Coordinate")
+
+    else:
+        plt.ylabel("X Coordinate \n (Left...Right)")
+
+    plt.show()
+    plt.close()
+
+def isJorZ(listener):
+
+    frames = listener.frames
+    xVals = []
+    yVals = []
+    for frame in frames: 
+         #for each frame...
+        for pinky in frame.hands.frontmost.fingers.finger_type(0): #for each pinky in the frontmost hand (there should be only one, but...)
+            tip = pinky.bone(3).next_joint
+            xVals.append(tip.x)
+            yVals.append(tip.y)
+
+    plot(xVals, False)
+    plot(yVals, True)
+    plt.close('all')
+    
+    return False
 
 #######################################################################
 #
@@ -443,8 +486,6 @@ def printFrameInfo(frame):
             print "%f %f %f" % (
                                                 hand.palm_position.x, hand.palm_position.y, hand.palm_position.z )
                 
-                
-                
             
             # Get fingers
             for finger in hand.fingers:
@@ -456,10 +497,6 @@ def printFrameInfo(frame):
                     print "%f %f %f" % (
                                             
                                               bone.next_joint.x, bone.next_joint.y, bone.next_joint.z )
-
-
-
-
 
 
 
@@ -637,46 +674,21 @@ def framesEqual(frame1, frame2):
     return True
 
 
-def isSteady(frameList, frameCount): 
-    """ isSteady function returns true if the hand is steady
-
-            checks if the last (framecount) frames in the list (frameList) are about equal
-            if so, the hand is steady, return true. otherwise return false.
-
-            Parameters
-            ----------
-            frameList : list of frames
-                list of recent frames, should have more than framecount
-            frameCount : int
-                number of frames to check
-
-            Returns
-            -------
-            bool
-                true if hand is steady, false otherwise.
-    """
-    total = len(frameList)
-
-    frame1 = frameList[total - frameCount] #first frame that we want to check
-    i = (total - frameCount + 1)           #index of the frame after that one
-    frame2 = frameList[i]
-
-    for x in range(i, frameCount):          #iterate through the selected frames
-
-        if (not(framesEqual(frame1, frame2))): #if they're not about equal,
-            print "NOT STEADY"
-            return False                    #then quit
-        frame1 = frame2                     #otherwise, iterate to the next 2 frames.
-        frame2 = frameList[x]
-    #print "STEADY"
-    return True                             #return true if you get through the entire loop 
 
 
+def isSteady(listener, frames):
+    
+    if (frames > len(listener.frames)):
+        return #invalid
 
-def isSteady(listener):
-    if (framesEqual(listener.frames[-1], listener.frames[-2]) and framesEqual(listener.frames[-2], listener.frames[-3])):
-        return True
-    return False
+    lastFrameIndex = len(listener.frames)-1
+    counter = 0
+    while (counter < frames):
+        if not (framesEqual(listener.frames[lastFrameIndex-counter], listener.frames[(lastFrameIndex-1)-counter])):
+            return False
+        counter += 1
+
+    return True
 
 
 
@@ -840,17 +852,18 @@ def main():
               
             #~ GET SIGN ~#
             if (ch == " " and  recording): #PRINT CURRENT SIGN
-                if (isSteady(listener)):
+                if (isSteady(listener, 15)):
                     myCoords = getCoordList(mostRecentFrame)
                     myFingerList = getFingers(mostRecentFrame)
                     myHand = mostRecentFrame.hands.frontmost
                     fingerStatuses = getFingerStatuses(myFingerList, myHand, False)
 
-                    getSign(fingerStatuses, mostRecentFrame.hands.frontmost, anglesToPalm(myFingerList, myHand, False), getFingerAngles(myFingerList,myHand, False), isTouching(myCoords, 'T_Distal', 'M_Distal', False))
+                    getSign(fingerStatuses, mostRecentFrame.hands.frontmost, anglesToPalm(myFingerList, myHand, False), getFingerAngles(myFingerList,myHand, False), isTouching(myCoords, 'T_Distal', 'M_Distal', False), listener)
                 else:
                     print "Hand is unsteady."
+                    isJorZ(listener)
             if (ch == "\n" and  recording):
-                if (isSteady(listener)):
+                if (isSteady(listener, 15)):
                     print "STEADY"
                 else:
                     print "NOT STEADY"
